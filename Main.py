@@ -32,9 +32,12 @@ class Graph():
 graph = None
 matrix = None 
 edge_prob = []
+
+WEIGHT_EFFECT = 0.1
+PART = 1000
+
 all_predicted = []
 all_real = []
-weight_effect = 0.1
 
 def calculate_weight(alpha=0.5, n = 50):
     probs = [alpha]
@@ -46,12 +49,23 @@ def calculate_weight(alpha=0.5, n = 50):
         w.append([alpha*prev_weight/val, alpha*(1-prev_weight)/(1-val)])
     return w
 
+def divide_mat(mat):
+	rows, cols = mat.shape
+	out = []
+	for i in range(0, rows, 1000):
+		res = np.sign(np.sum(np.absolute(mat[i:i+1000]), axis = 0))
+		out.append(res)
+	out = np.array(out)
+	out = np.sum(out, axis = 0)
+	print(np.sum(np.sign(out - np.ones(out.shape[0]))), mat.shape[1])
+
 def compressed_sense(equation):
 	A0 = np.array(equation[0])
+	divide_mat(A0)
 	Y0 = np.array(equation[2])
 	W = np.array(equation[3])
 	X0 = cvx.Variable(A0.shape[1])
-	objective = cvx.Minimize(cvx.norm(X0, 1))
+	objective = cvx.Minimize(cvx.norm(W*X0, 1))
 	prob = cvx.Problem(objective, [A0*X0 == Y0])
 	result = prob.solve()
 	return X0.value
@@ -99,15 +113,15 @@ def construct_mat(edges, alpha):
 			for i in range(len(path)-1):
 				key = (path[i], path[i+1])
 				if key not in weights_dict:
-					weights_dict[key] = 1 + weight_effect*(edge_prob[len(path)][1]-alpha)
+					weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
 				if err_sum == 0:
-					weights_dict[key] = 1 + weight_effect*(edge_prob[len(path)][0]-alpha)
+					weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
 
 			key = (path[0], path[len(path)-1])
 			if key not in weights_dict:
-				weights_dict[key] = 1 + weight_effect*(edge_prob[len(path)][1]-alpha)
+				weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
 			if err_sum == 0:
-				weights_dict[key] = 1 + weight_effect*(edge_prob[len(path)][0]-alpha)
+				weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
 		
 			Y.append(err_sum)
 	
@@ -164,8 +178,6 @@ def solve_partition(edges, alpha):
 
 	all_predicted.extend(predicted)
 	all_real.extend(real)
-		
-	# print(evaluate(predicted, real))
 
 def flatten(input_list):
 	return_list = list()
@@ -173,18 +185,16 @@ def flatten(input_list):
 		return_list.extend(l)
 	return return_list
 
-def main(file_path, alpha):
+def start(file_path, alpha):
 	global graph
 	global matrix
 	global edge_prob
 
 	print(file_path)
-	PART = 100
 	file = open(file_path)
 	graph = Graph()
 	matrix = graph.g
 	edge_prob = calculate_weight(alpha=alpha)
-	# all_edges = dict()
 	edges = dict()
 	for l in file:
 		edge = list(map(int, re.split('->|:', l)))
@@ -194,15 +204,6 @@ def main(file_path, alpha):
 				edges = dict()
 			edges[edge[0]] = []
 		edges[edge[0]].append(edge)
-		# if edge[1] not in edges:
-		# 	for e in range(edge[0]-1, edge[1], -1):
-		# 		if e not in edges and e in all_edges:
-		# 			edges[e] = all_edges[e]
-		# 			if len(edges) == PART:
-		# 				break
-		# if edge[0] not in all_edges:
-		# 	all_edges[edge[0]] = []
-		# all_edges[edge[0]].append(edge)
 		graph.add_edge(edge)
 	solve_partition(flatten(list(edges.values())), alpha)
 
@@ -214,4 +215,4 @@ if __name__ == '__main__':
 		for f in filenames:
 			if f.endswith('.txt'):
 				splitted = f.split('_')
-				main('graphs/' + f, int(splitted[1][:2]))
+				start('graphs/' + f, int(splitted[1][:2])/100)
