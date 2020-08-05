@@ -2,6 +2,7 @@ import re
 import numpy as np
 import cvxpy as cvx
 from os import walk
+import time
 
 class Graph():
 	def __init__(self):
@@ -25,19 +26,24 @@ class Graph():
 			for n in self.g[node[0]]:
 				if n in visited:
 					continue
-				queue.append((n, node[1] + [n]))
+				try:
+					if n <= queue[0][0] and n >= des:
+						queue.insert(0, (n, node[1] + [n]))
+					else:
+						queue.append((n, node[1] + [n]))
+				except:
+					queue.append((n, node[1] + [n]))
 				visited.append(n)
 		return node[1]
 
 graph = None
 matrix = None 
-edge_prob = []
+edge_prob = list()
 
 WEIGHT_EFFECT = 0.1
-PART = 1000
+PART = 100
 
-all_predicted = []
-all_real = []
+all_predicted = list()
 
 def calculate_weight(alpha=0.5, n = 50):
     probs = [alpha]
@@ -49,66 +55,64 @@ def calculate_weight(alpha=0.5, n = 50):
         w.append([alpha*prev_weight/val, alpha*(1-prev_weight)/(1-val)])
     return w
 
-def divide_mat(mat):
-	rows, cols = mat.shape
-	out = []
-	for i in range(0, rows, 1000):
-		res = np.sign(np.sum(np.absolute(mat[i:i+1000]), axis = 0))
-		out.append(res)
-	out = np.array(out)
-	out = np.sum(out, axis = 0)
-	print(np.sum(np.sign(out - np.ones(out.shape[0]))), mat.shape[1])
-
 def compressed_sense(equation):
-	A0 = np.array(equation[0])
-	divide_mat(A0)
-	Y0 = np.array(equation[2])
-	W = np.array(equation[3])
+	A0 = equation[0]
+	Y0 = equation[2]
+	W = equation[3]
 	X0 = cvx.Variable(A0.shape[1])
 	objective = cvx.Minimize(cvx.norm(W*X0, 1))
 	prob = cvx.Problem(objective, [A0*X0 == Y0])
 	result = prob.solve()
 	return X0.value
 
+def double_mat_size(A):
+	result = np.zeros((2*A.shape[0], 2*A.shape[1]))
+	result[:A.shape[0],:A.shape[1]] = A
+	return result
+
 def construct_mat(edges, alpha):
-	unknown_edges = []
+	unknown_edges = list()
+	unknown_edges_dict = dict()
 	weights_dict = {}
-	A = []
+	A = np.zeros((PART, PART))
 	Y = []
+	row_counter = 0
 	for e in edges:
 		if e[0]-1 > e[1]:
 			path = [e[0]] + graph.bfs(e[0]-1, e[1])
-			row = [0]*len(unknown_edges)
-			A.append(row)
+			row = A[row_counter, ]
+			row_counter += 1
 			err_sum = 0
 			for i in range(len(path)-1):
 				edge_val = matrix[path[i]][path[i+1]]
 				err_sum += edge_val[1]
-				found = False
-				for u  in range(len(unknown_edges)):
-					if unknown_edges[u] == (path[i], path[i+1]):
-						row[u] = 1
-						found = True
-						break
-				if not found:
-					unknown_edges.append((path[i], path[i+1]))
-					row.append(1)
-					for r in range(len(A)-1):
-						A[r].append(0)
+				path_edge = (path[i], path[i+1])
+				if path_edge not in unknown_edges_dict:
+					unknown_edges.append(path_edge)
+					u = len(unknown_edges)-1
+					if u >= A.shape[0]:
+						A = double_mat_size(A)
+					row = A[row_counter-1, ]
+					unknown_edges_dict[path_edge] = u
+					row[u] = 1
+				else:
+					u = unknown_edges_dict[path_edge]
+					row[u] = 1
 
 			edge_val = matrix[path[0]][path[len(path)-1]]
 			err_sum -= edge_val[1]
-			found = False
-			for u  in range(len(unknown_edges)):
-				if unknown_edges[u] == (path[0], path[len(path)-1]):
-					row[u] = -1
-					found = True
-					break
-			if not found:
-				unknown_edges.append((path[0], path[len(path)-1]))
-				row.append(-1)
-				for r in range(len(A)-1):
-					A[r].append(0)
+			path_edge = (path[0], path[len(path)-1])
+			if path_edge not in unknown_edges_dict:
+				unknown_edges.append(path_edge)
+				u = len(unknown_edges)-1
+				if u >= A.shape[0]:
+					A = double_mat_size(A)
+				row = A[row_counter-1, ]
+				unknown_edges_dict[path_edge] = u
+				row[u] = -1
+			else:
+				u = unknown_edges_dict[path_edge]
+				row[u] = -1
 			
 			for i in range(len(path)-1):
 				key = (path[i], path[i+1])
@@ -124,18 +128,19 @@ def construct_mat(edges, alpha):
 				weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
 		
 			Y.append(err_sum)
-	
+	A = A[:row_counter, ]
+	A = A.T[:len(unknown_edges), ].T
+	Y = np.array(Y)
+
 	weights = []
 	for i in range(len(unknown_edges)):
 		weights.append([0]*len(unknown_edges))
 		weights[i][i] = weights_dict[unknown_edges[i]]
+	weights = np.array(weights)
 
 	return (A, unknown_edges, Y, weights)
 
 def evaluate(predicted, real):
-	global all_n
-	global all_propagated
-
 	n = len(predicted)
 	zero_n = 0
 	eval = {'accuracy':0, 'zero accuracy':0, 'propagated':0, 'absolute propagated':0}
@@ -165,19 +170,24 @@ def solve_partition(edges, alpha):
 	res = compressed_sense(equation)
 	predicted = []
 	real = []
-
+	# s = 0
+	# c = 0
 	for i in range(len(equation[1])):
 		edge = matrix[equation[1][i][0]][equation[1][i][1]]
 		if edge[0] is None:
 			edge[0] = res[i]
 		else:
+			# s += edge[0]-res[i]
+			# c += 1
 			edge[0] = (edge[2]*edge[0] + res[i])/(edge[2]+1)
 		edge[2] += 1
 		predicted.append(edge[0])
 		real.append(edge[1])
-
-	all_predicted.extend(predicted)
-	all_real.extend(real)
+		if edge not in all_predicted:
+			all_predicted.append(edge)
+	# print(evaluate(predicted, real))
+	# if c != 0:
+	# 	print(s/c)
 
 def flatten(input_list):
 	return_list = list()
@@ -189,11 +199,14 @@ def start(file_path, alpha):
 	global graph
 	global matrix
 	global edge_prob
+	global all_predicted
 
+	timer = time.perf_counter()
 	print(file_path)
 	file = open(file_path)
 	graph = Graph()
 	matrix = graph.g
+	all_predicted = list()
 	edge_prob = calculate_weight(alpha=alpha)
 	edges = dict()
 	for l in file:
@@ -206,8 +219,13 @@ def start(file_path, alpha):
 		edges[edge[0]].append(edge)
 		graph.add_edge(edge)
 	solve_partition(flatten(list(edges.values())), alpha)
-
-	print('total: ',evaluate(all_predicted, all_real))
+	print(time.perf_counter()-timer)
+	predicted = []
+	real = []
+	for e in  all_predicted:
+		predicted.append(e[0])
+		real.append(e[1])
+	print('total: ',evaluate(predicted, real))
 
 if __name__ == '__main__':
 	for (dirpath, dirnames, filenames) in walk('graphs/'):
