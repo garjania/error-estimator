@@ -41,7 +41,7 @@ matrix = None
 edge_prob = list()
 
 WEIGHT_EFFECT = 0.1
-PART = 100
+PART = 1000
 
 all_predicted = list()
 
@@ -60,7 +60,7 @@ def compressed_sense(equation):
 	Y0 = equation[2]
 	W = equation[3]
 	X0 = cvx.Variable(A0.shape[1])
-	objective = cvx.Minimize(cvx.norm(W*X0, 1))
+	objective = cvx.Minimize(cvx.norm(X0, 1))
 	prob = cvx.Problem(objective, [A0*X0 == Y0])
 	result = prob.solve()
 	return X0.value
@@ -74,7 +74,7 @@ def construct_mat(edges, alpha):
 	unknown_edges = list()
 	unknown_edges_dict = dict()
 	weights_dict = {}
-	A = np.zeros((PART, PART))
+	A = np.zeros((5*PART, 5*PART))
 	Y = []
 	row_counter = 0
 	for e in edges:
@@ -87,45 +87,53 @@ def construct_mat(edges, alpha):
 				edge_val = matrix[path[i]][path[i+1]]
 				err_sum += edge_val[1]
 				path_edge = (path[i], path[i+1])
-				if path_edge not in unknown_edges_dict:
+				
+				not_found = path_edge[0] not in unknown_edges_dict
+				if not_found or path_edge[1] not in unknown_edges_dict[path_edge[0]]:
 					unknown_edges.append(path_edge)
 					u = len(unknown_edges)-1
 					if u >= A.shape[0]:
 						A = double_mat_size(A)
 					row = A[row_counter-1, ]
-					unknown_edges_dict[path_edge] = u
+					if not_found:
+						unknown_edges_dict[path_edge[0]] = dict()
+					unknown_edges_dict[path_edge[0]][path_edge[1]] = u
 					row[u] = 1
 				else:
-					u = unknown_edges_dict[path_edge]
+					u = unknown_edges_dict[path_edge[0]][path_edge[1]]
 					row[u] = 1
 
 			edge_val = matrix[path[0]][path[len(path)-1]]
 			err_sum -= edge_val[1]
 			path_edge = (path[0], path[len(path)-1])
-			if path_edge not in unknown_edges_dict:
+
+			not_found = path_edge[0] not in unknown_edges_dict
+			if not_found or path_edge[1] not in unknown_edges_dict[path_edge[0]]:
 				unknown_edges.append(path_edge)
 				u = len(unknown_edges)-1
 				if u >= A.shape[0]:
 					A = double_mat_size(A)
 				row = A[row_counter-1, ]
-				unknown_edges_dict[path_edge] = u
+				if not_found:
+						unknown_edges_dict[path_edge[0]] = dict()
+				unknown_edges_dict[path_edge[0]][path_edge[1]] = u
 				row[u] = -1
 			else:
 				u = unknown_edges_dict[path_edge]
 				row[u] = -1
-			
-			for i in range(len(path)-1):
-				key = (path[i], path[i+1])
-				if key not in weights_dict:
-					weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
-				if err_sum == 0:
-					weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
 
-			key = (path[0], path[len(path)-1])
-			if key not in weights_dict:
-				weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
-			if err_sum == 0:
-				weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
+			# for i in range(len(path)-1):
+			# 	key = (path[i], path[i+1])
+			# 	if key not in weights_dict:
+			# 		weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
+			# 	if err_sum == 0:
+			# 		weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
+
+			# key = (path[0], path[len(path)-1])
+			# if key not in weights_dict:
+			# 	weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][1]-alpha)
+			# if err_sum == 0:
+			# 	weights_dict[key] = 1 + WEIGHT_EFFECT*(edge_prob[len(path)][0]-alpha)
 		
 			Y.append(err_sum)
 	A = A[:row_counter, ]
@@ -133,10 +141,10 @@ def construct_mat(edges, alpha):
 	Y = np.array(Y)
 
 	weights = []
-	for i in range(len(unknown_edges)):
-		weights.append([0]*len(unknown_edges))
-		weights[i][i] = weights_dict[unknown_edges[i]]
-	weights = np.array(weights)
+	# for i in range(len(unknown_edges)):
+	# 	weights.append([0]*len(unknown_edges))
+	# 	weights[i][i] = weights_dict[unknown_edges[i]]
+	# weights = np.array(weights)
 
 	return (A, unknown_edges, Y, weights)
 
@@ -166,25 +174,27 @@ def evaluate(predicted, real):
 def solve_partition(edges, alpha):
 	if len(edges) == 0:
 		return
+	# timer = time.perf_counter()
 	equation = construct_mat(edges, alpha)
 	res = compressed_sense(equation)
-	predicted = []
-	real = []
-	# s = 0
-	# c = 0
-	for i in range(len(equation[1])):
-		edge = matrix[equation[1][i][0]][equation[1][i][1]]
-		if edge[0] is None:
-			edge[0] = res[i]
-		else:
-			# s += edge[0]-res[i]
-			# c += 1
-			edge[0] = (edge[2]*edge[0] + res[i])/(edge[2]+1)
-		edge[2] += 1
-		predicted.append(edge[0])
-		real.append(edge[1])
-		if edge not in all_predicted:
-			all_predicted.append(edge)
+	# print(time.perf_counter() - timer)
+	# predicted = []
+	# real = []
+	# # s = 0
+	# # c = 0
+	# for i in range(len(equation[1])):
+	# 	edge = matrix[equation[1][i][0]][equation[1][i][1]]
+	# 	if edge[0] is None:
+	# 		edge[0] = res[i]
+	# 	else:
+	# 		# s += edge[0]-res[i]
+	# 		# c += 1
+	# 		edge[0] = (edge[2]*edge[0] + res[i])/(edge[2]+1)
+	# 	edge[2] += 1
+	# 	predicted.append(edge[0])
+	# 	real.append(edge[1])
+	# 	if edge not in all_predicted:
+	# 		all_predicted.append(edge)
 	# print(evaluate(predicted, real))
 	# if c != 0:
 	# 	print(s/c)
@@ -225,7 +235,7 @@ def start(file_path, alpha):
 	for e in  all_predicted:
 		predicted.append(e[0])
 		real.append(e[1])
-	print('total: ',evaluate(predicted, real))
+	# print('total: ',evaluate(predicted, real))
 
 if __name__ == '__main__':
 	for (dirpath, dirnames, filenames) in walk('graphs/'):
